@@ -1,0 +1,54 @@
+# PXT Smart Infrastructure Engine - Git Ignore Specification
+
+# Node / Frontend Build & Dependencies
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+.vite/
+.eslintcache
+
+# Python Caches & Virtual Environments
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Environment Files & Secrets
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+*.pem
+*.key
+*.cert
+
+# Database & Runtime State
+pxt_iot.db
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+logs/
+*.log
+
+# IDE & System Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
