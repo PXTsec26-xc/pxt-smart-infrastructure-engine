@@ -280,5 +280,5 @@ When the backend server is running (`http://127.0.0.1:8000`), access the interac
 ## 21. Founder Attribution
 
 **PXT Smart Infrastructure Engine**  
-Designed, Engineered, and Developed by **Elliot PXT sec26**.  
+Designed, Engineered, and Developed by **Sahil Maisuria (Elliot PXT sec26)**.  
 Copyright © 2026. All Rights Reserved.
