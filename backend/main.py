@@ -54,9 +54,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+else:
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -527,3 +533,30 @@ async def health_readiness(db: AsyncSession = Depends(get_db)):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "NOT_READY", "database": db_ok, "mqtt_broker": mqtt_ok}
         )
+
+@app.get("/api/health/diagnostics")
+async def health_diagnostics(db: AsyncSession = Depends(get_db)):
+    total_res = await db.execute(select(func.count()).select_from(DeviceORM))
+    total_devices = total_res.scalar() or 0
+
+    online_res = await db.execute(select(func.count()).select_from(DeviceORM).where(DeviceORM.status == "ONLINE"))
+    online_devices = online_res.scalar() or 0
+
+    alert_res = await db.execute(select(func.count()).select_from(AlertORM).where(AlertORM.acknowledged == False, AlertORM.resolved == False))
+    active_alerts = alert_res.scalar() or 0
+
+    mqtt_ok = mqtt_ingestion.client.is_connected() if mqtt_ingestion.client else False
+
+    return {
+        "status": "HEALTHY",
+        "system": "PXT Smart Infrastructure Engine",
+        "version": "1.2.0",
+        "environment": os.getenv("ENVIRONMENT", "production"),
+        "database": "ONLINE",
+        "mqtt_broker": "CONNECTED" if mqtt_ok else "DISCONNECTED",
+        "total_devices": total_devices,
+        "online_devices": online_devices,
+        "active_alerts": active_alerts,
+        "uptime_status": "OPERATIONAL",
+        "timestamp": time.time()
+    }

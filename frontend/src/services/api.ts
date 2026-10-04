@@ -1,7 +1,32 @@
 import { Device, TelemetryRecord, Alert, AlertSummary, SystemEvent, AutomationRule, AutomationHistory, CommandRecord, SystemHealth } from '../types';
 
-const API_BASE = "http://127.0.0.1:8000";
-const WS_BASE = "ws://127.0.0.1:8000/ws";
+const getApiBase = (): string => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    const protocol = window.location.protocol === "https:" ? "https:" : "http:";
+    return `${protocol}//${window.location.host}`;
+  }
+  return "http://127.0.0.1:8000";
+};
+
+const getWsBase = (): string => {
+  if (import.meta.env.VITE_WS_BASE_URL) {
+    return import.meta.env.VITE_WS_BASE_URL;
+  }
+  const apiBase = getApiBase();
+  if (apiBase.startsWith("https://")) {
+    return apiBase.replace("https://", "wss://") + "/ws";
+  }
+  if (apiBase.startsWith("http://")) {
+    return apiBase.replace("http://", "ws://") + "/ws";
+  }
+  return "ws://127.0.0.1:8000/ws";
+};
+
+const API_BASE = getApiBase();
+const WS_BASE = getWsBase();
 
 let token: string | null = localStorage.getItem("pxt_token");
 

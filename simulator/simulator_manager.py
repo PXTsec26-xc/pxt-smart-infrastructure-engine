@@ -382,10 +382,10 @@ def build_25_devices(broker_host: str = "127.0.0.1", broker_port: int = 1883) ->
     return devices
 
 class SimulatorRunner:
-    def __init__(self, broker_host: str = "127.0.0.1", broker_port: int = 1883):
-        self.broker_host = broker_host
-        self.broker_port = broker_port
-        self.devices = build_25_devices(broker_host, broker_port)
+    def __init__(self, broker_host: str = None, broker_port: int = None):
+        self.broker_host = broker_host or os.getenv("MQTT_HOST", "127.0.0.1")
+        self.broker_port = broker_port or int(os.getenv("MQTT_PORT", "1883"))
+        self.devices = build_25_devices(self.broker_host, self.broker_port)
 
     async def run(self):
         logger.info(f"Starting PXT Simulator Suite with {len(self.devices)} autonomous virtual devices...")

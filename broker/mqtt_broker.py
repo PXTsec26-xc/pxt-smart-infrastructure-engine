@@ -11,16 +11,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PXT-MQTT-Broker")
 
+MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_WS_PORT = int(os.getenv("MQTT_WS_PORT", "9001"))
+
 BROKER_CONFIG = {
     "listeners": {
         "default": {
             "type": "tcp",
-            "bind": "127.0.0.1:1883",
+            "bind": f"{MQTT_HOST}:{MQTT_PORT}",
             "max_connections": 1000,
         },
         "ws": {
             "type": "ws",
-            "bind": "127.0.0.1:9001",
+            "bind": f"{MQTT_HOST}:{MQTT_WS_PORT}",
             "max_connections": 1000,
         }
     },
