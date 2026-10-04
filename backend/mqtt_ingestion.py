@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import os
 from typing import Dict, Any, Optional
 
 import paho.mqtt.client as mqtt
@@ -13,10 +14,13 @@ from backend.websocket_manager import ws_manager
 
 logger = logging.getLogger("PXT-MQTT-Ingestion")
 
+MQTT_HOST_DEFAULT = os.getenv("MQTT_HOST", "127.0.0.1")
+MQTT_PORT_DEFAULT = int(os.getenv("MQTT_PORT", "1883"))
+
 class MQTTIngestionService:
-    def __init__(self, broker_host: str = "127.0.0.1", broker_port: int = 1883):
-        self.broker_host = broker_host
-        self.broker_port = broker_port
+    def __init__(self, broker_host: Optional[str] = None, broker_port: Optional[int] = None):
+        self.broker_host = broker_host or os.getenv("MQTT_HOST", MQTT_HOST_DEFAULT)
+        self.broker_port = broker_port or int(os.getenv("MQTT_PORT", str(MQTT_PORT_DEFAULT)))
         
         try:
             self.client = mqtt.Client(
@@ -27,12 +31,17 @@ class MQTTIngestionService:
             self.client = mqtt.Client(client_id="pxt_backend_ingestion")
 
         self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
         self._loop = None
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
-        logger.info(f"MQTT Ingestion Engine connected to broker (rc={rc}). Subscribing to pxt/# ...")
+        logger.info(f"MQTT Ingestion Engine connected to broker at {self.broker_host}:{self.broker_port} (rc={rc}). Subscribing to pxt/# ...")
         self.client.subscribe("pxt/#", qos=1)
+
+    def _on_disconnect(self, client, userdata, flags, rc, properties=None):
+        if rc != 0:
+            logger.warning(f"MQTT Ingestion disconnected unexpectedly (rc={rc}). Will automatically attempt reconnect...")
 
     def _on_message(self, client, userdata, msg):
         topic = msg.topic

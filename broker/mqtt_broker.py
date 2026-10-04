@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PXT-MQTT-Broker")
 
-MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
+MQTT_BIND_HOST = os.getenv("MQTT_BIND_HOST", os.getenv("MQTT_HOST", "0.0.0.0"))
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_WS_PORT = int(os.getenv("MQTT_WS_PORT", "9001"))
 
@@ -19,12 +19,12 @@ BROKER_CONFIG = {
     "listeners": {
         "default": {
             "type": "tcp",
-            "bind": f"{MQTT_HOST}:{MQTT_PORT}",
+            "bind": f"{MQTT_BIND_HOST}:{MQTT_PORT}",
             "max_connections": 1000,
         },
         "ws": {
             "type": "ws",
-            "bind": f"{MQTT_HOST}:{MQTT_WS_PORT}",
+            "bind": f"{MQTT_BIND_HOST}:{MQTT_WS_PORT}",
             "max_connections": 1000,
         }
     },
@@ -39,10 +39,10 @@ BROKER_CONFIG = {
 }
 
 async def start_broker():
-    logger.info("Initializing PXT Smart Infrastructure MQTT Broker on 127.0.0.1:1883 (TCP) & 9001 (WS)...")
+    logger.info(f"Initializing PXT Smart Infrastructure MQTT Broker on {MQTT_BIND_HOST}:{MQTT_PORT} (TCP) & {MQTT_WS_PORT} (WS)...")
     broker = Broker(BROKER_CONFIG)
     await broker.start()
-    logger.info("MQTT Broker is FULLY OPERATIONAL and accepting connections.")
+    logger.info(f"MQTT Broker is FULLY OPERATIONAL on {MQTT_BIND_HOST}:{MQTT_PORT} and accepting connections.")
     try:
         while True:
             await asyncio.sleep(3600)

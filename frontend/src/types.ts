@@ -95,9 +95,48 @@ export interface CommandRecord {
   acknowledged_at?: number;
 }
 
+export type ConnectionState = 'CONNECTING' | 'CONNECTED' | 'DEGRADED' | 'RECONNECTING' | 'OFFLINE';
+
+export interface SystemConfig {
+  system_name: string;
+  version: string;
+  environment: string;
+  operating_mode: 'SIMULATION' | 'PHYSICAL_HARDWARE';
+  mqtt_broker: {
+    host: string;
+    tcp_port: number;
+    ws_port: number;
+    connected: boolean;
+  };
+  ws_endpoint: string;
+  capabilities: {
+    virtual_devices_count: number;
+    domains: string[];
+    physical_hardware_supported: boolean;
+    modbus_tcp_supported: boolean;
+    http_rest_ingestion_supported: boolean;
+  };
+  timestamp: number;
+}
+
+export interface ConnectionDiagnostics {
+  state: ConnectionState;
+  apiBase: string;
+  wsBase: string;
+  latencyMs: number | null;
+  lastSuccessfulSync: number | null;
+  retryAttempt: number;
+  maxRetries: number;
+  errorMessage: string | null;
+  isCustomUrl: boolean;
+}
+
 export interface SystemHealth {
   status: string;
   mqtt_broker_connected: boolean;
+  broker_host?: string;
+  broker_port?: number;
+  broker_ws_port?: number;
   total_devices: number;
   online_devices: number;
   offline_devices: number;

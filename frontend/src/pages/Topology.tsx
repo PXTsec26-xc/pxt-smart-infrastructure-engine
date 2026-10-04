@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Cpu, Server, Database, Radio, Monitor, ArrowRight, Zap, Info, CheckCircle2, XCircle, ZoomIn, ZoomOut, RotateCcw, X, Activity } from 'lucide-react';
 import { Device, SystemHealth } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
+import { getApiBase, getWsBase } from '../services/api';
 
 interface Props {
   devices: Device[];
@@ -13,6 +14,7 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
   const [zoomLevel, setZoomLevel] = useState<number>(1.0);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
 
+  const totalDevices = devices.length || (health?.total_devices ?? 25);
   const onlineCount = devices.filter(d => d.status === 'ONLINE').length;
   const offlineCount = devices.filter(d => d.status === 'OFFLINE').length;
   const degradedCount = devices.filter(d => d.status === 'DEGRADED' || d.status === 'MALFUNCTIONING').length;
@@ -20,6 +22,12 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
   const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.15, 1.5));
   const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.15, 0.7));
   const handleResetZoom = () => setZoomLevel(1.0);
+
+  const apiEndpoint = getApiBase();
+  const wsEndpoint = getWsBase();
+  const brokerHost = health?.broker_host || "MQTT Ingestion Engine";
+  const brokerPort = health?.broker_port || 1883;
+  const brokerWsPort = health?.broker_ws_port || 9001;
 
   return (
     <div className="space-y-6 font-mono">
@@ -33,7 +41,7 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
 
         <div className="flex items-center gap-3">
           <span className="bg-cyan-950 text-cyan-400 px-2.5 py-1 rounded border border-cyan-800/60 font-bold shrink-0">
-            25 VIRTUAL SIMULATORS CONNECTED
+            {totalDevices} VIRTUAL SIMULATORS INTEGRATED
           </span>
 
           {/* Canvas Zoom Controls */}
@@ -78,37 +86,41 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
             {/* COLUMN 1: Autonomous Devices */}
             <div className="space-y-3">
               <div className="text-center text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-center gap-1.5">
-                <Cpu className="w-4 h-4 text-cyan-400" /> 25 IoT Simulators
+                <Cpu className="w-4 h-4 text-cyan-400" /> {totalDevices} IoT Simulators
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 max-h-[420px] overflow-y-auto space-y-2 pr-1 text-xs">
-                {devices.map((dev) => (
-                  <div
-                    key={dev.id}
-                    onClick={() => {
-                      setSelectedNode({
-                        name: dev.name,
-                        id: dev.id,
-                        domain: dev.domain,
-                        status: dev.status,
-                        type: "Virtual Device Simulator",
-                        location: dev.location,
-                        uptime: `${dev.uptime}s`,
-                        topics: [`pxt/telemetry/${dev.id}`, `pxt/heartbeat/${dev.id}`, `pxt/commands/${dev.id}`],
-                        detail: `Autonomous Python simulator executing physical sensor state model for sector ${dev.domain}.`
-                      });
-                      onSelectDevice(dev.id);
-                    }}
-                    className={`p-2.5 rounded border cursor-pointer transition-all flex items-center justify-between ${
-                      dev.status === 'ONLINE' ? 'bg-slate-950 border-emerald-800/50 hover:border-emerald-500' : 'bg-slate-950 border-red-800/50 hover:border-red-500'
-                    }`}
-                  >
-                    <div>
-                      <div className="font-bold text-slate-200 text-xs">{dev.id}</div>
-                      <div className="text-[10px] text-slate-400 truncate max-w-[110px]">{dev.name}</div>
+                {devices.length === 0 ? (
+                  <div className="text-center text-slate-500 py-6">Connecting device registry...</div>
+                ) : (
+                  devices.map((dev) => (
+                    <div
+                      key={dev.id}
+                      onClick={() => {
+                        setSelectedNode({
+                          name: dev.name,
+                          id: dev.id,
+                          domain: dev.domain,
+                          status: dev.status,
+                          type: "Virtual Device Simulator",
+                          location: dev.location,
+                          uptime: `${dev.uptime}s`,
+                          topics: [`pxt/telemetry/${dev.id}`, `pxt/heartbeat/${dev.id}`, `pxt/commands/${dev.id}`],
+                          detail: `Autonomous process simulator executing continuous physical sensor state & boundary models for sector ${dev.domain}.`
+                        });
+                        onSelectDevice(dev.id);
+                      }}
+                      className={`p-2.5 rounded border cursor-pointer transition-all flex items-center justify-between ${
+                        dev.status === 'ONLINE' ? 'bg-slate-950 border-emerald-800/50 hover:border-emerald-500' : 'bg-slate-950 border-red-800/50 hover:border-red-500'
+                      }`}
+                    >
+                      <div>
+                        <div className="font-bold text-slate-200 text-xs">{dev.id}</div>
+                        <div className="text-[10px] text-slate-400 truncate max-w-[110px]">{dev.name}</div>
+                      </div>
+                      <StatusBadge status={dev.status} size="sm" />
                     </div>
-                    <StatusBadge status={dev.status} size="sm" />
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 
@@ -117,7 +129,7 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
               <span className="font-bold">MQTT v3.1.1</span>
               <div className="w-full h-0.5 bg-gradient-to-r from-cyan-500 to-teal-500 animate-pulse" />
               <ArrowRight className="w-5 h-5 text-teal-400" />
-              <span>TCP 1883 / WS 9001</span>
+              <span>TCP {brokerPort} / WS {brokerWsPort}</span>
             </div>
 
             {/* COLUMN 2: MQTT Broker Engine */}
@@ -127,9 +139,9 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
               </div>
               <div
                 onClick={() => setSelectedNode({
-                  name: "Embedded Python MQTT Broker (amqtt)",
+                  name: "MQTT Middleware Broker (amqtt / Async)",
                   type: "Messaging Middleware",
-                  address: "127.0.0.1:1883 (TCP) / 127.0.0.1:9001 (WS)",
+                  address: `Broker TCP: ${brokerPort} | WS: ${brokerWsPort}`,
                   detail: "Handles high-frequency telemetry ingestion, heartbeat monitoring streams, command acknowledgements, and retained device status payloads."
                 })}
                 className="bg-slate-900 border border-teal-500/50 hover:border-teal-400 rounded-xl p-6 shadow-lg shadow-teal-500/10 text-center space-y-3 cursor-pointer w-full transition-all"
@@ -138,8 +150,8 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
                   <Radio className="w-6 h-6 animate-pulse" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-100 text-sm">amqtt Broker</h4>
-                  <p className="text-[11px] text-slate-400">127.0.0.1:1883</p>
+                  <h4 className="font-bold text-slate-100 text-sm">MQTT Broker</h4>
+                  <p className="text-[11px] text-slate-400 font-mono">TCP {brokerPort} | WS {brokerWsPort}</p>
                 </div>
                 <div className="pt-2 border-t border-slate-800 text-[10px] text-emerald-400 font-bold">
                   {health?.mqtt_broker_connected ? "● BROKER ONLINE" : "○ DISCONNECTED"}
@@ -165,28 +177,28 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
                 onClick={() => setSelectedNode({
                   name: "FastAPI Processing Core",
                   type: "Backend Service",
-                  address: "127.0.0.1:8000",
+                  address: apiEndpoint,
                   detail: "Asynchronous backend executing 2s heartbeat watching, backend automation rule evaluations, JWT security, and WebSockets broadcasting."
                 })}
                 className="bg-slate-900 border border-blue-500/50 hover:border-blue-400 rounded-xl p-4 shadow-lg text-center cursor-pointer transition-all"
               >
                 <Server className="w-5 h-5 text-blue-400 mx-auto mb-1" />
                 <h5 className="font-bold text-slate-100 text-xs">FastAPI Engine</h5>
-                <p className="text-[10px] text-slate-400">HTTP 8000 & WS</p>
+                <p className="text-[10px] text-slate-400 font-mono truncate max-w-[180px] mx-auto">{apiEndpoint}</p>
               </div>
 
               <div
                 onClick={() => setSelectedNode({
-                  name: "SQLite Persistence Engine (pxt_iot.db)",
+                  name: "Persistence Engine (pxt_iot.db)",
                   type: "Relational Database",
-                  address: "Local file: pxt_iot.db",
+                  address: "pxt_iot.db (Async SQLAlchemy)",
                   detail: "Stores device registry, telemetry records with (device_id, timestamp) indexing, alerts, events, automation history, commands, users, and audit logs."
                 })}
                 className="bg-slate-900 border border-purple-500/50 hover:border-purple-400 rounded-xl p-4 shadow-lg text-center cursor-pointer transition-all"
               >
                 <Database className="w-5 h-5 text-purple-400 mx-auto mb-1" />
-                <h5 className="font-bold text-slate-100 text-xs">SQLite DB</h5>
-                <p className="text-[10px] text-slate-400">Async SQLAlchemy</p>
+                <h5 className="font-bold text-slate-100 text-xs">Persistence Store</h5>
+                <p className="text-[10px] text-slate-400">Async SQLAlchemy DB</p>
               </div>
             </div>
 
@@ -209,6 +221,12 @@ export const Topology: React.FC<Props> = ({ devices, health, onSelectDevice }) =
             <h4 className="font-bold text-sm text-cyan-400">{selectedNode.name}</h4>
             <span className="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{selectedNode.type}</span>
           </div>
+          {selectedNode.address && (
+            <div className="text-[11px] text-slate-400 font-mono">
+              <span className="font-bold text-slate-200">Endpoint Address: </span>
+              <span className="text-cyan-300">{selectedNode.address}</span>
+            </div>
+          )}
           <p className="text-slate-300 leading-relaxed">{selectedNode.detail}</p>
           {selectedNode.topics && (
             <div className="pt-2 border-t border-slate-800/80 font-mono text-[11px] text-slate-400">

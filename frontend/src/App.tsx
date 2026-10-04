@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Navbar } from './components/Navbar';
 import { Overview } from './pages/Overview';
 import { DeviceList } from './pages/DeviceList';
@@ -8,12 +8,23 @@ import { AlertsPage } from './pages/Alerts';
 import { AutomationPage } from './pages/Automation';
 import { AuditLogsPage } from './pages/AuditLogs';
 import { SystemHealthPage } from './pages/SystemHealthPage';
-import { Device, Alert, AlertSummary, SystemHealth, TelemetryRecord, SystemEvent } from './types';
+import {
+  Device,
+  Alert,
+  AlertSummary,
+  SystemHealth,
+  SystemConfig,
+  TelemetryRecord,
+  SystemEvent,
+  ConnectionState,
+  ConnectionDiagnostics
+} from './types';
 import {
   fetchDevices,
   fetchAlerts,
   fetchAlertSummary,
   fetchHealth,
+  fetchConfig,
   fetchLatestTelemetry,
   fetchEvents,
   fetchSystemMode,
@@ -22,7 +33,8 @@ import {
   acknowledgeAlert,
   resolveAlert,
   subscribeWebSocket,
-  loginUser
+  loginUser,
+  connectionManager
 } from './services/api';
 
 export function App() {
@@ -33,62 +45,90 @@ export function App() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [alertSummary, setAlertSummary] = useState<AlertSummary | null>(null);
   const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [config, setConfig] = useState<SystemConfig | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryRecord[]>([]);
   const [events, setEvents] = useState<SystemEvent[]>([]);
   const [systemMode, setSystemModeState] = useState<string>('SIMULATION');
-  const [wsConnected, setWsConnected] = useState(false);
+
+  const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics>(connectionManager.getDiagnostics());
+  const wsControlRef = useRef<{ unsubscribe: () => void; reconnect: () => void } | null>(null);
+
+  const loadAllData = useCallback(async () => {
+    try {
+      const [dData, aData, sumData, hData, tData, eData, mData, cData] = await Promise.all([
+        fetchDevices().catch(err => { console.warn("Devices fetch error:", err); return []; }),
+        fetchAlerts().catch(err => { console.warn("Alerts fetch error:", err); return []; }),
+        fetchAlertSummary().catch(err => { console.warn("Alert summary fetch error:", err); return null; }),
+        fetchHealth().catch(err => { console.warn("Health fetch error:", err); return null; }),
+        fetchLatestTelemetry().catch(err => { console.warn("Telemetry fetch error:", err); return []; }),
+        fetchEvents().catch(err => { console.warn("Events fetch error:", err); return []; }),
+        fetchSystemMode().catch(err => { console.warn("System mode fetch error:", err); return { mode: 'SIMULATION', description: '' }; }),
+        fetchConfig().catch(err => { console.warn("Config fetch error:", err); return null; })
+      ]);
+
+      if (dData.length > 0) setDevices(dData);
+      setAlerts(aData);
+      if (sumData) setAlertSummary(sumData);
+      if (hData) setHealth(hData);
+      if (tData.length > 0) setTelemetry(tData);
+      if (eData.length > 0) setEvents(eData);
+      if (mData?.mode) setSystemModeState(mData.mode);
+      if (cData) setConfig(cData);
+    } catch (err) {
+      console.error("Error loading system data:", err);
+    }
+  }, []);
+
+  const handleReconnect = useCallback(() => {
+    connectionManager.resetRetryCount();
+    if (wsControlRef.current) {
+      wsControlRef.current.reconnect();
+    }
+    loadAllData();
+  }, [loadAllData]);
 
   useEffect(() => {
+    // 1. Subscribe to connection state changes
+    const unsubDiag = connectionManager.subscribe((diag) => {
+      setDiagnostics(diag);
+    });
+
+    // 2. Auto-login default viewer credentials
     loginUser("admin", "admin123").catch(err => console.log("Login auto-init:", err));
 
+    // 3. Initial load
     loadAllData();
-    const interval = setInterval(loadAllData, 5000);
 
-    const unsubscribe = subscribeWebSocket((msg) => {
-      setWsConnected(true);
-      if (msg.type === "TELEMETRY_UPDATED") {
-        setTelemetry(prev => [msg.data, ...prev.slice(0, 99)]);
-      } else if (msg.type === "DEVICE_STATE_CHANGE") {
-        setDevices(prev => prev.map(d => d.id === msg.data.device_id ? { ...d, status: msg.data.status } : d));
-      } else if (msg.type === "ALERT_CREATED") {
-        setAlerts(prev => [msg.data, ...prev]);
-        fetchAlertSummary().then(setAlertSummary).catch(console.error);
-      } else if (msg.type === "ALERT_ACKNOWLEDGED" || msg.type === "ALERT_RESOLVED") {
-        fetchAlerts().then(setAlerts).catch(console.error);
-        fetchAlertSummary().then(setAlertSummary).catch(console.error);
-      } else if (msg.type === "SYSTEM_MODE_CHANGED") {
-        setSystemModeState(msg.data.mode);
+    // 4. Periodic HTTP sync with adaptive backoff
+    const pollIntervalMs = diagnostics.state === 'OFFLINE' ? 30000 : 5000;
+    const interval = setInterval(loadAllData, pollIntervalMs);
+
+    // 5. Connect WebSocket telemetry stream
+    const wsControl = subscribeWebSocket(
+      (msg) => {
+        if (msg.type === "TELEMETRY_UPDATED") {
+          setTelemetry(prev => [msg.data, ...prev.slice(0, 99)]);
+        } else if (msg.type === "DEVICE_STATE_CHANGE") {
+          setDevices(prev => prev.map(d => d.id === msg.data.device_id ? { ...d, status: msg.data.status } : d));
+        } else if (msg.type === "ALERT_CREATED") {
+          setAlerts(prev => [msg.data, ...prev]);
+          fetchAlertSummary().then(setAlertSummary).catch(console.error);
+        } else if (msg.type === "ALERT_ACKNOWLEDGED" || msg.type === "ALERT_RESOLVED") {
+          fetchAlerts().then(setAlerts).catch(console.error);
+          fetchAlertSummary().then(setAlertSummary).catch(console.error);
+        } else if (msg.type === "SYSTEM_MODE_CHANGED") {
+          setSystemModeState(msg.data.mode);
+        }
       }
-    });
+    );
+    wsControlRef.current = wsControl;
 
     return () => {
       clearInterval(interval);
-      unsubscribe();
+      unsubDiag();
+      wsControl.unsubscribe();
     };
-  }, []);
-
-  const loadAllData = async () => {
-    try {
-      const [dData, aData, sumData, hData, tData, eData, mData] = await Promise.all([
-        fetchDevices(),
-        fetchAlerts(),
-        fetchAlertSummary(),
-        fetchHealth(),
-        fetchLatestTelemetry(),
-        fetchEvents(),
-        fetchSystemMode()
-      ]);
-      setDevices(dData);
-      setAlerts(aData);
-      setAlertSummary(sumData);
-      setHealth(hData);
-      setTelemetry(tData);
-      setEvents(eData);
-      setSystemModeState(mData.mode);
-    } catch (err) {
-      console.error("Error fetching data:", err);
-    }
-  };
+  }, [loadAllData, diagnostics.state]);
 
   const handleToggleSystemMode = async () => {
     const targetMode = systemMode === 'SIMULATION' ? 'PHYSICAL_HARDWARE' : 'SIMULATION';
@@ -103,7 +143,7 @@ export function App() {
   const handleSendCommand = async (deviceId: string, action: string, params: any = {}) => {
     try {
       await sendDeviceCommand(deviceId, action, params);
-      setTimeout(loadAllData, 1000);
+      setTimeout(loadAllData, 800);
     } catch (err) {
       console.error("Error sending command:", err);
     }
@@ -143,10 +183,12 @@ export function App() {
           if (tab !== 'device-detail') setSelectedDeviceId(null);
         }}
         health={health}
-        wsConnected={wsConnected}
+        connectionState={diagnostics.state}
+        diagnostics={diagnostics}
         activeAlertCount={activeAlertCount}
         systemMode={systemMode}
         onToggleMode={handleToggleSystemMode}
+        onReconnect={handleReconnect}
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -158,8 +200,11 @@ export function App() {
             health={health}
             telemetry={telemetry}
             events={events}
+            connectionState={diagnostics.state}
+            diagnostics={diagnostics}
             onSelectDevice={handleSelectDevice}
             onAcknowledgeAlert={handleAcknowledgeAlert}
+            onRetryConnection={handleReconnect}
           />
         )}
 
@@ -201,7 +246,9 @@ export function App() {
 
         {activeTab === 'audit' && <AuditLogsPage />}
 
-        {activeTab === 'system' && <SystemHealthPage health={health} />}
+        {activeTab === 'system' && (
+          <SystemHealthPage health={health} config={config} />
+        )}
       </main>
 
       <footer className="bg-slate-950 border-t border-slate-800/80 py-3.5 font-mono text-xs text-slate-500 text-center">

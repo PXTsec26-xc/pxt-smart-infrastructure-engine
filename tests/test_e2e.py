@@ -245,3 +245,42 @@ def test_h_runtime_stability_and_resources():
     assert health["status"] == "OPERATIONAL"
 
     print("TEST H PASSED: All 25 virtual devices operating concurrently with zero unhandled process exceptions.")
+
+# --- TEST I: Public Configuration API Endpoint ---
+def test_i_public_config_endpoint():
+    print("\nExecuting TEST I: Public Configuration Endpoint Verification")
+    resp = requests.get(f"{BASE_URL}/api/config", timeout=5)
+    assert resp.status_code == 200, f"Config endpoint failed with {resp.status_code}"
+    cfg = resp.json()
+    assert "system_name" in cfg
+    assert "version" in cfg
+    assert "operating_mode" in cfg
+    assert "mqtt_broker" in cfg
+    assert "capabilities" in cfg
+    assert cfg["capabilities"]["virtual_devices_count"] == 25
+    assert cfg["capabilities"]["physical_hardware_supported"] is True
+    print(f"TEST I PASSED: Public config verified (Mode: {cfg['operating_mode']}, Broker Connected: {cfg['mqtt_broker']['connected']})")
+
+# --- TEST J: CORS & Security Headers ---
+def test_j_cors_and_security_headers():
+    print("\nExecuting TEST J: CORS & Public Browser Security Headers")
+    # Simulate cross-origin request from public dashboard
+    headers = {"Origin": "https://pxt-dashboard.vercel.app"}
+    resp = requests.get(f"{BASE_URL}/api/health", headers=headers, timeout=5)
+    assert resp.status_code == 200
+    assert "access-control-allow-origin" in resp.headers or "Access-Control-Allow-Origin" in resp.headers
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert resp.headers.get("x-frame-options") == "DENY"
+    print("TEST J PASSED: CORS headers and Security Headers properly attached for public browser callers.")
+
+# --- TEST K: Enhanced Diagnostics & Provenance ---
+def test_k_diagnostics_endpoint():
+    print("\nExecuting TEST K: Enhanced Health Diagnostics & Provenance")
+    resp = requests.get(f"{BASE_URL}/api/health/diagnostics", timeout=5)
+    assert resp.status_code == 200
+    diag = resp.json()
+    assert diag["status"] == "HEALTHY"
+    assert diag["total_devices"] == 25
+    assert "broker_host" in diag
+    assert "broker_port" in diag
+    print(f"TEST K PASSED: Health diagnostics confirmed (Total Devices: {diag['total_devices']}, Broker: {diag['mqtt_broker']})")

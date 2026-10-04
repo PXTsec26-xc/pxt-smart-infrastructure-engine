@@ -4,7 +4,7 @@ import asyncio
 import logging
 import signal
 import json
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -17,7 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PXT-Simulator-Manager")
 
-def build_25_devices(broker_host: str = "127.0.0.1", broker_port: int = 1883) -> List[VirtualDevice]:
+def build_25_devices(broker_host: Optional[str] = None, broker_port: Optional[int] = None) -> List[VirtualDevice]:
+    b_host = broker_host or os.getenv("MQTT_HOST", "127.0.0.1")
+    b_port = broker_port or int(os.getenv("MQTT_PORT", "1883"))
     devices = []
 
     # --- 1. SMART GRID ENERGY (5 Devices) ---
@@ -34,7 +36,7 @@ def build_25_devices(broker_host: str = "127.0.0.1", broker_port: int = 1883) ->
             "oil_temp": SensorModel("Transformer Oil Temp", "°C", 35.0, 95.0, 58.0, 1.2),
             "frequency": SensorModel("Grid Frequency", "Hz", 49.0, 51.0, 50.0, 0.05)
         },
-        broker_host=broker_host, broker_port=broker_port
+        broker_host=b_host, broker_port=b_port
     ))
 
     devices.append(VirtualDevice(

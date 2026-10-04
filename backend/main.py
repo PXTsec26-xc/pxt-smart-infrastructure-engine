@@ -49,7 +49,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self' 'unsafe-inline' ws: wss:;"
+        response.headers["Content-Security-Policy"] = "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: ws: wss: http: https:; connect-src *;"
         return response
 
 app.add_middleware(SecurityHeadersMiddleware)
@@ -68,7 +68,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-mqtt_ingestion = MQTTIngestionService()
+mqtt_ingestion = MQTTIngestionService(
+    broker_host=os.getenv("MQTT_HOST", "127.0.0.1"),
+    broker_port=int(os.getenv("MQTT_PORT", "1883"))
+)
 http_adapter = HTTPRESTAdapter()
 health_monitor_task: Optional[asyncio.Task] = None
 
@@ -487,6 +490,38 @@ async def get_audit_logs(limit: int = 100, db: AsyncSession = Depends(get_db)):
     res = await db.execute(stmt)
     return res.scalars().all()
 
+# --- SYSTEM CONFIG & PUBLIC METADATA API ---
+@app.get("/api/config")
+async def get_public_config(db: AsyncSession = Depends(get_db)):
+    cfg_res = await db.execute(select(SystemConfigORM).where(SystemConfigORM.key == "system_mode"))
+    cfg = cfg_res.scalar_one_or_none()
+    mode = cfg.value if cfg else os.getenv("SYSTEM_OPERATING_MODE", "SIMULATION")
+    mqtt_ok = mqtt_ingestion.client.is_connected() if mqtt_ingestion.client else False
+    broker_host = os.getenv("MQTT_PUBLIC_HOST", os.getenv("MQTT_HOST", "127.0.0.1"))
+    broker_tcp_port = int(os.getenv("MQTT_PORT", "1883"))
+    broker_ws_port = int(os.getenv("MQTT_WS_PORT", "9001"))
+    return {
+        "system_name": "PXT Smart Infrastructure Real-Time Engine",
+        "version": "1.2.0",
+        "environment": os.getenv("ENVIRONMENT", "production"),
+        "operating_mode": mode,
+        "mqtt_broker": {
+            "host": broker_host,
+            "tcp_port": broker_tcp_port,
+            "ws_port": broker_ws_port,
+            "connected": mqtt_ok
+        },
+        "ws_endpoint": "/ws",
+        "capabilities": {
+            "virtual_devices_count": 25,
+            "domains": ["Smart Grid", "Water Management", "HVAC Systems", "Industrial Manufacturing", "Environmental Monitoring"],
+            "physical_hardware_supported": True,
+            "modbus_tcp_supported": True,
+            "http_rest_ingestion_supported": True
+        },
+        "timestamp": time.time()
+    }
+
 # --- HEALTH, LIVENESS & READINESS DIAGNOSTICS (PHASE 6) ---
 @app.get("/api/health")
 async def get_system_health(db: AsyncSession = Depends(get_db)):
@@ -502,9 +537,14 @@ async def get_system_health(db: AsyncSession = Depends(get_db)):
     alert_res = await db.execute(select(func.count()).select_from(AlertORM).where(AlertORM.acknowledged == False, AlertORM.resolved == False))
     active_alerts = alert_res.scalar() or 0
 
+    mqtt_ok = mqtt_ingestion.client.is_connected() if mqtt_ingestion.client else False
+
     return {
         "status": "OPERATIONAL",
-        "mqtt_broker_connected": mqtt_ingestion.client.is_connected() if mqtt_ingestion.client else False,
+        "mqtt_broker_connected": mqtt_ok,
+        "broker_host": os.getenv("MQTT_HOST", "127.0.0.1"),
+        "broker_port": int(os.getenv("MQTT_PORT", "1883")),
+        "broker_ws_port": int(os.getenv("MQTT_WS_PORT", "9001")),
         "total_devices": total_devices,
         "online_devices": online_devices,
         "offline_devices": offline_devices,
@@ -554,6 +594,9 @@ async def health_diagnostics(db: AsyncSession = Depends(get_db)):
         "environment": os.getenv("ENVIRONMENT", "production"),
         "database": "ONLINE",
         "mqtt_broker": "CONNECTED" if mqtt_ok else "DISCONNECTED",
+        "broker_host": os.getenv("MQTT_HOST", "127.0.0.1"),
+        "broker_port": int(os.getenv("MQTT_PORT", "1883")),
+        "broker_ws_port": int(os.getenv("MQTT_WS_PORT", "9001")),
         "total_devices": total_devices,
         "online_devices": online_devices,
         "active_alerts": active_alerts,

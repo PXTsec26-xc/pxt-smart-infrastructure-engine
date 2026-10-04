@@ -6,6 +6,10 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     command: python broker/mqtt_broker.py
+    environment:
+      - MQTT_BIND_HOST=0.0.0.0
+      - MQTT_PORT=1883
+      - MQTT_WS_PORT=9001
     ports:
       - "1883:1883"
       - "9001:9001"
@@ -16,6 +20,15 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
+      - MQTT_WS_PORT=9001
+      - ALLOWED_ORIGINS=*
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite+aiosqlite:////app/pxt_iot.db
     ports:
       - "8000:8000"
     volumes:
@@ -29,6 +42,9 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     command: python simulator/simulator_manager.py
+    environment:
+      - MQTT_HOST=mqtt-broker
+      - MQTT_PORT=1883
     depends_on:
       - mqtt-broker
       - backend
@@ -40,6 +56,7 @@ services:
       dockerfile: Dockerfile.frontend
     ports:
       - "80:80"
+      - "5173:80"
     depends_on:
       - backend
     restart: always
