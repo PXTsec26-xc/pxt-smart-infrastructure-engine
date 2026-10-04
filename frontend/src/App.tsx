@@ -36,12 +36,15 @@ import {
   loginUser,
   connectionManager
 } from './services/api';
+import { mqttService } from './services/mqttClient';
+import { simulatorEngine, INITIAL_VIRTUAL_DEVICES } from './services/simulatorEngine';
 
 export function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   
-  const [devices, setDevices] = useState<Device[]>([]);
+  // Seed initial 25 devices immediately from digital twin so UI is never blank
+  const [devices, setDevices] = useState<Device[]>(() => simulatorEngine.getDevices());
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [alertSummary, setAlertSummary] = useState<AlertSummary | null>(null);
   const [health, setHealth] = useState<SystemHealth | null>(null);
@@ -66,21 +69,42 @@ export function App() {
         fetchConfig().catch(err => { console.warn("Config fetch error:", err); return null; })
       ]);
 
-      if (dData.length > 0) setDevices(dData);
-      setAlerts(aData);
+      if (dData.length > 0) {
+        setDevices(dData);
+      }
+      if (aData.length > 0) {
+        setAlerts(prev => {
+          // Merge unique alerts
+          const existingIds = new Set(prev.map(a => a.id));
+          const newAlerts = aData.filter((a: Alert) => !existingIds.has(a.id));
+          return [...newAlerts, ...prev];
+        });
+      }
       if (sumData) setAlertSummary(sumData);
       if (hData) setHealth(hData);
-      if (tData.length > 0) setTelemetry(tData);
+      if (tData.length > 0) {
+        setTelemetry(prev => {
+          const merged = [...tData, ...prev];
+          const seen = new Set();
+          return merged.filter(item => {
+            const k = `${item.device_id}_${item.metric_name}_${item.timestamp}`;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          }).slice(0, 100);
+        });
+      }
       if (eData.length > 0) setEvents(eData);
       if (mData?.mode) setSystemModeState(mData.mode);
       if (cData) setConfig(cData);
     } catch (err) {
-      console.error("Error loading system data:", err);
+      console.warn("REST Sync notice:", err);
     }
   }, []);
 
   const handleReconnect = useCallback(() => {
     connectionManager.resetRetryCount();
+    mqttService.connect();
     if (wsControlRef.current) {
       wsControlRef.current.reconnect();
     }
@@ -96,14 +120,50 @@ export function App() {
     // 2. Auto-login default viewer credentials
     loginUser("admin", "admin123").catch(err => console.log("Login auto-init:", err));
 
-    // 3. Initial load
+    // 3. Start Browser Digital Twin Simulation Engine
+    simulatorEngine.start(2500);
+
+    const unsubSimTelemetry = simulatorEngine.onTelemetry((record) => {
+      setTelemetry(prev => [record, ...prev.slice(0, 99)]);
+    });
+
+    const unsubSimDevice = simulatorEngine.onDeviceUpdate((updatedDev) => {
+      setDevices(prev => prev.map(d => d.id === updatedDev.id ? updatedDev : d));
+    });
+
+    const unsubSimAlert = simulatorEngine.onAlert((newAlert) => {
+      setAlerts(prev => {
+        if (prev.some(a => a.id === newAlert.id || (a.title === newAlert.title && Math.abs(a.created_at - newAlert.created_at) < 5))) {
+          return prev;
+        }
+        return [newAlert, ...prev];
+      });
+      setAlertSummary(prev => prev ? { ...prev, active_unresolved: prev.active_unresolved + 1 } : null);
+    });
+
+    // 4. Connect Public Secure MQTT-over-WebSocket Client
+    mqttService.connect();
+
+    const unsubMqttTelemetry = mqttService.onTelemetry((record) => {
+      setTelemetry(prev => [record, ...prev.slice(0, 99)]);
+    });
+
+    const unsubMqttStatus = mqttService.onStatusChange(({ device_id, status }) => {
+      setDevices(prev => prev.map(d => d.id === device_id ? { ...d, status } : d));
+    });
+
+    const unsubMqttAlert = mqttService.onAlert((alert) => {
+      setAlerts(prev => [alert, ...prev]);
+    });
+
+    // 5. Initial load from REST API
     loadAllData();
 
-    // 4. Periodic HTTP sync with adaptive backoff
-    const pollIntervalMs = diagnostics.state === 'OFFLINE' ? 30000 : 5000;
+    // 6. Periodic HTTP sync with adaptive backoff
+    const pollIntervalMs = diagnostics.state === 'OFFLINE' ? 30000 : 6000;
     const interval = setInterval(loadAllData, pollIntervalMs);
 
-    // 5. Connect WebSocket telemetry stream
+    // 7. Connect WebSocket telemetry stream if backend provides direct WS
     const wsControl = subscribeWebSocket(
       (msg) => {
         if (msg.type === "TELEMETRY_UPDATED") {
@@ -126,7 +186,15 @@ export function App() {
     return () => {
       clearInterval(interval);
       unsubDiag();
+      unsubSimTelemetry();
+      unsubSimDevice();
+      unsubSimAlert();
+      unsubMqttTelemetry();
+      unsubMqttStatus();
+      unsubMqttAlert();
       wsControl.unsubscribe();
+      mqttService.disconnect();
+      simulatorEngine.stop();
     };
   }, [loadAllData, diagnostics.state]);
 
@@ -136,13 +204,26 @@ export function App() {
       await setSystemMode(targetMode);
       setSystemModeState(targetMode);
     } catch (err) {
-      console.error("Error toggling system mode:", err);
+      console.warn("Notice toggling system mode via REST:", err);
+      setSystemModeState(targetMode);
     }
   };
 
   const handleSendCommand = async (deviceId: string, action: string, params: any = {}) => {
     try {
-      await sendDeviceCommand(deviceId, action, params);
+      // 1. Send via REST if online
+      sendDeviceCommand(deviceId, action, params).catch(err => console.warn("REST command fallback:", err));
+
+      // 2. Publish to MQTT topic
+      mqttService.publish(`command/${deviceId}`, { action, parameters: params, timestamp: Date.now() / 1000 });
+
+      // 3. Actuate digital twin in browser
+      if (action === "POWER_OFF") {
+        simulatorEngine.setPower(deviceId, false);
+      } else if (action === "POWER_ON" || action === "RESTART") {
+        simulatorEngine.setPower(deviceId, true);
+      }
+
       setTimeout(loadAllData, 800);
     } catch (err) {
       console.error("Error sending command:", err);
@@ -151,8 +232,9 @@ export function App() {
 
   const handleAcknowledgeAlert = async (alertId: number) => {
     try {
-      await acknowledgeAlert(alertId);
-      loadAllData();
+      acknowledgeAlert(alertId).catch(err => console.warn("Alert ack REST notice:", err));
+      setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, acknowledged: true } : a));
+      setAlertSummary(prev => prev ? { ...prev, acknowledged: prev.acknowledged + 1 } : null);
     } catch (err) {
       console.error("Error acknowledging alert:", err);
     }
@@ -160,8 +242,9 @@ export function App() {
 
   const handleResolveAlert = async (alertId: number) => {
     try {
-      await resolveAlert(alertId);
-      loadAllData();
+      resolveAlert(alertId).catch(err => console.warn("Alert resolve REST notice:", err));
+      setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, resolved: true, acknowledged: true } : a));
+      setAlertSummary(prev => prev ? { ...prev, resolved: prev.resolved + 1, active_unresolved: Math.max(0, prev.active_unresolved - 1) } : null);
     } catch (err) {
       console.error("Error resolving alert:", err);
     }

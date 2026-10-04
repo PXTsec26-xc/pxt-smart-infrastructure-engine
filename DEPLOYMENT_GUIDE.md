@@ -1,65 +1,93 @@
-# PXT Smart Infrastructure — Production Deployment Guide
+# PXT Smart Infrastructure — Production Deployment Guide (Vercel + Neon + TLS MQTT)
 
-## 1. Local Machine Deployment (Development)
-To run natively on a local host:
+This guide documents the $0 zero-cost production architecture deployed on **Vercel** with **Neon Serverless PostgreSQL** for persistent relational storage and **TLS MQTT-over-WebSocket** for distributed telemetry.
+
+---
+
+## 1. Architecture Summary
+
+| Component | Platform | Protocol / Transport | Purpose | Cost |
+| :--- | :--- | :--- | :--- | :--- |
+| **Frontend Dashboard** | Vercel Edge / CDN | HTTPS / HTTP/2 | React 18 SCADA & Digital Twin UI | $0 (Vercel Free Tier) |
+| **Serverless REST API** | Vercel Functions (`/api/*`) | HTTPS ASGI | Stateless endpoints for devices, health, telemetry history, audit logs, commands | $0 (Vercel Free Tier) |
+| **Database** | Neon PostgreSQL | `postgresql+asyncpg://` | Persistent storage with connection pooling & zero dormancy | $0 (Neon Free Tier) |
+| **Real-Time Telemetry** | EMQX / Public Broker | `wss://` (TLS Port 8084) | Distributed MQTT-over-WebSocket topic stream (`pxt/sec26_prod/#`) | $0 (Free / Open Protocol) |
+| **Digital Twin Engine** | In-Browser Physics Worker | Client-side TypeScript | Autonomous simulation for 25 IoT nodes; survives network/broker outages | $0 (Client-side) |
+
+---
+
+## 2. Deploying to Vercel
+
+### Step 1: Push Repository to GitHub / GitLab
+Ensure `vercel.json` and `api/index.py` are present in repository root.
+
+### Step 2: Import Project in Vercel
+1. Go to [vercel.com/new](https://vercel.com/new) and select your repository.
+2. Framework Preset: **Vite** (or Other).
+3. Root Directory: `./` (Leave as repository root; `vercel.json` handles builds and routing).
+4. Build Command: `cd frontend && npm install && npm run build` (defined in `vercel.json`).
+5. Output Directory: `frontend/dist`.
+
+### Step 3: Configure Environment Variables in Vercel Project Settings
+Set the following environment variables in Vercel Dashboard (*Settings -> Environment Variables*):
+
+```env
+# Neon PostgreSQL Connection String (from Neon Console)
+DATABASE_URL=postgres://neondb_owner:YOUR_PASSWORD@ep-xyz-123456.us-east-2.aws.neon.tech/neondb?sslmode=require
+
+# Vercel Runtime Indicator
+VERCEL=1
+
+# Security & CORS
+ALLOWED_ORIGINS=*
+SECRET_KEY=pxt-sec26-production-jwt-secret-key-32-chars-min
+ENVIRONMENT=production
+
+# MQTT Broker Configuration (Optional override; defaults to TLS WSS)
+VITE_MQTT_BROKER_WSS=wss://broker.emqx.io:8084/mqtt
+```
+
+---
+
+## 3. Database Setup & Automated Migrations (Neon PostgreSQL)
+
+1. Create a free project at [neon.tech](https://neon.tech).
+2. Copy the Connection URI (*Pooled* or *Direct*).
+3. To test or run migrations locally against Neon:
+   ```bash
+   export DATABASE_URL="postgres://neondb_owner:YOUR_PASS@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require"
+   python backend/migrate_db.py
+   ```
+4. When deployed to Vercel, the FastAPI ASGI startup handler automatically invokes `run_migrations()` and `seed_database()` during initialization.
+
+---
+
+## 4. Local Development Deployment
+
+To run the full stack locally with Python virtual environment:
 
 ```bash
-# 1. Install Python dependencies
+# 1. Install dependencies
 pip install -r requirements.txt
+cd frontend && npm install && cd ..
 
-# 2. Build or start Frontend
-cd frontend && npm install && npm run build && cd ..
+# 2. Run automated test suite
+python run_tests.py
 
-# 3. Boot full stack with unified runner
+# 3. Start full stack runner
 python start_system.py
 ```
-- Dashboard: `http://localhost:5173`
-- Backend API Docs: `http://127.0.0.1:8000/docs`
-- MQTT Broker: `127.0.0.1:1883` (TCP) / `127.0.0.1:9001` (WS)
+- **Dashboard:** `http://localhost:5173`
+- **Backend API Docs:** `http://127.0.0.1:8000/docs`
+- **MQTT Broker:** `127.0.0.1:1883` (TCP) / `127.0.0.1:9001` (WS)
 
 ---
 
-## 2. Public Cloud Deployment (Decoupled: Vercel + Render / Railway)
+## 5. In-App Connectivity & Diagnostics Modal
 
-### Step 1: Deploy Backend & MQTT Broker (Render / Railway / Fly.io / VPS)
-Deploy using the backend Dockerfile `Dockerfile.backend`:
-- **Build Command:** Built automatically from `Dockerfile.backend`
-- **Start Command:** `uvicorn backend.main:app --host 0.0.0.0 --port 8000` (or `python start_system.py`)
-- **Environment Variables:**
-  - `HOST` = `0.0.0.0`
-  - `PORT` = `8000`
-  - `ALLOWED_ORIGINS` = `*`
-  - `ENVIRONMENT` = `production`
-  - `MQTT_BIND_HOST` = `0.0.0.0`
-  - `MQTT_HOST` = `127.0.0.1`
-  - `MQTT_PORT` = `1883`
-  - `MQTT_WS_PORT` = `9001`
-
-### Step 2: Deploy Frontend (Vercel / Netlify / Cloudflare Pages)
-Connect the repository and set the root directory to `frontend`:
-- **Build Command:** `npm run build`
-- **Output Directory:** `dist`
-- **Environment Variables:**
-  - `VITE_API_BASE_URL` = `https://your-backend-service.onrender.com`
-  - `VITE_WS_BASE_URL` = `wss://your-backend-service.onrender.com/ws`
-
----
-
-## 3. Docker Containerized Production Deployment (Single Host / VM)
-To deploy the full multi-service stack via Docker Compose:
-
-```bash
-docker-compose up --build -d
-```
-
-Services instantiated:
-- `mqtt-broker` (Ports 1883 TCP, 9001 WS)
-- `backend` (Port 8000 REST & WS)
-- `simulator` (25 Autonomous Virtual Devices)
-- `frontend` (Port 80 & 5173 NGINX Static Web Server)
-
----
-
-## 4. In-App Dynamic Endpoint Switching
-Public visitors can also supply any backend URL dynamically using the in-app **Connection Settings Modal** or query parameters without rebuilding the code:
-- Example: `https://pxt-dashboard.vercel.app?api=https://pxt-backend.onrender.com&ws=wss://pxt-backend.onrender.com/ws`
+Operators and visitors can inspect or adjust network endpoints dynamically at runtime without rebuilding the frontend:
+- **Connection Pill:** Located in the top navigation bar with real-time status (`LIVE`, `DEGRADED`, `RECONNECTING`, `OFFLINE`).
+- **Settings Modal:** Access by clicking the status pill. Allows testing REST API response latency, switching MQTT brokers, and triggering digital twin anomaly injections.
+- **Query Parameter Overrides:**
+  - `?api=https://your-custom-api.vercel.app`
+  - `?mqtt=wss://broker.emqx.io:8084/mqtt`

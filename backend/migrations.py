@@ -10,7 +10,12 @@ from backend.models import SystemConfigORM
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("PXT-DatabaseMigrations")
 
+_migrations_ran = False
+
 async def run_migrations():
+    global _migrations_ran
+    if _migrations_ran:
+        return
     logger.info("Running PXT Database Migrations & Schema Verification...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -24,18 +29,22 @@ async def run_migrations():
 
         # Check and add resolved column to alerts table if missing
         try:
-            await conn.execute(text("ALTER TABLE alerts ADD COLUMN resolved BOOLEAN DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE alerts ADD COLUMN resolved BOOLEAN DEFAULT FALSE"))
             logger.info("Migrated schema: Added 'resolved' column to alerts table.")
         except Exception:
             pass
 
     async with AsyncSessionLocal() as session:
         # Verify migration version key
-        res = await session.execute(text("SELECT key FROM system_config WHERE key = 'schema_version'"))
-        if not res.scalar_one_or_none():
-            session.add(SystemConfigORM(key="schema_version", value="1.2.0"))
-            await session.commit()
+        try:
+            res = await session.execute(text("SELECT key FROM system_config WHERE key = 'schema_version'"))
+            if not res.scalar_one_or_none():
+                session.add(SystemConfigORM(key="schema_version", value="1.2.0"))
+                await session.commit()
+        except Exception as e:
+            logger.warning(f"Notice verifying schema_version: {e}")
 
+    _migrations_ran = True
     logger.info("PXT Database Migrations Completed Successfully.")
 
 async def apply_telemetry_retention_policy(retention_days: int = 30):

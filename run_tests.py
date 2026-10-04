@@ -13,7 +13,7 @@ def main():
     print(f"Python Executable: {sys.executable}")
     print(f"Working Directory: {ROOT_DIR}\n")
 
-    cmd = [sys.executable, "-m", "pytest", "tests/test_e2e.py", "-v", "-s", "--color=yes"]
+    cmd = [sys.executable, "-m", "pytest", "tests/", "-v", "-s", "--color=yes"]
     print(f"Executing: {' '.join(cmd)}\n")
 
     result = subprocess.run(cmd, cwd=ROOT_DIR)

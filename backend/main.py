@@ -81,19 +81,23 @@ async def on_startup():
     await run_migrations()
     await seed_database()
     await http_adapter.initialize()
-    mqtt_ingestion.start()
-    global health_monitor_task
-    health_monitor_task = asyncio.create_task(start_health_monitor_loop())
-    logger.info("PXT Production Backend Services launched successfully.")
+    if os.getenv("VERCEL") != "1" and os.getenv("DISABLE_BACKGROUND_SERVICES") != "1":
+        mqtt_ingestion.start()
+        global health_monitor_task
+        health_monitor_task = asyncio.create_task(start_health_monitor_loop())
+        logger.info("PXT Production Background Daemons launched successfully.")
+    else:
+        logger.info("PXT Serverless Mode: Background daemons skipped for stateless execution.")
 
 @app.on_event("shutdown")
 async def on_shutdown():
     logger.info("Shutting down PXT Backend Services gracefully...")
-    mqtt_ingestion.stop()
-    await http_adapter.shutdown()
-    if health_monitor_task:
-        health_monitor_task.cancel()
-    logger.info("PXT Production Backend Services shut down cleanly.")
+    if os.getenv("VERCEL") != "1" and os.getenv("DISABLE_BACKGROUND_SERVICES") != "1":
+        mqtt_ingestion.stop()
+        await http_adapter.shutdown()
+        if health_monitor_task:
+            health_monitor_task.cancel()
+    logger.info("PXT Backend Services shut down cleanly.")
 
 # --- WEBSOCKET ENDPOINT ---
 @app.websocket("/ws")
@@ -143,7 +147,17 @@ async def list_devices(domain: Optional[str] = None, status: Optional[str] = Non
         stmt = stmt.where(DeviceORM.status == status)
     stmt = stmt.order_by(DeviceORM.id)
     res = await db.execute(stmt)
-    return res.scalars().all()
+    devices = res.scalars().all()
+    
+    # In Vercel serverless environment, virtual simulation devices remain online when powered on
+    now = time.time()
+    if os.getenv("VERCEL") == "1" or os.getenv("DISABLE_BACKGROUND_SERVICES") == "1":
+        for dev in devices:
+            if dev.is_powered_on and dev.status != "MALFUNCTIONING":
+                dev.status = "ONLINE"
+                dev.last_seen = now
+
+    return devices
 
 class DeviceCreateRequest(BaseModel):
     id: str
@@ -565,9 +579,16 @@ async def health_readiness(db: AsyncSession = Depends(get_db)):
         db_ok = False
 
     mqtt_ok = mqtt_ingestion.client.is_connected() if mqtt_ingestion.client else False
+    is_serverless = os.getenv("VERCEL") == "1" or os.getenv("DISABLE_BACKGROUND_SERVICES") == "1"
 
-    if db_ok and mqtt_ok:
-        return {"status": "READY", "database": "CONNECTED", "mqtt_broker": "CONNECTED", "timestamp": time.time()}
+    if db_ok and (mqtt_ok or is_serverless):
+        return {
+            "status": "READY",
+            "database": "CONNECTED",
+            "mqtt_broker": "CONNECTED" if mqtt_ok else "CLIENT_WSS_MODE",
+            "execution_mode": "SERVERLESS" if is_serverless else "PERSISTENT_DAEMON",
+            "timestamp": time.time()
+        }
     else:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

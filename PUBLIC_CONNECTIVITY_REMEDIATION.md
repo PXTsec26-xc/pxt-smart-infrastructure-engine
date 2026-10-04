@@ -185,10 +185,10 @@ docker-compose up --build -d
 ## 6. Automated Test & Build Verification Results
 
 ### Test Suite Execution Summary
-- **Test Runner:** `python run_tests.py` (pytest v8.x / Python 3.13)
-- **Total Tests Executed:** 11 / 11
-- **Pass Rate:** **100% (11 Passed, 0 Failed)**
-- **Total Duration:** 35.41s
+- **Test Runner:** `python run_tests.py` (pytest v9.1 / Python 3.13)
+- **Total Tests Executed:** 17 / 17
+- **Pass Rate:** **100% (17 Passed, 0 Failed)**
+- **Total Duration:** 36.58s
 
 ```
 ================================== TEST RESULTS ==================================
@@ -203,15 +203,22 @@ tests/test_e2e.py::test_h_runtime_stability_and_resources .............. PASSED
 tests/test_e2e.py::test_i_public_config_endpoint ....................... PASSED
 tests/test_e2e.py::test_j_cors_and_security_headers .................... PASSED
 tests/test_e2e.py::test_k_diagnostics_endpoint ......................... PASSED
-============================= 11 passed in 35.41s =============================
+tests/test_mqtt_wss_format.py::test_mqtt_topic_namespacing ............. PASSED
+tests/test_mqtt_wss_format.py::test_telemetry_packet_framing ........... PASSED
+tests/test_neon_migrations.py::test_neon_url_normalization ............. PASSED
+tests/test_neon_migrations.py::test_database_migrations_and_seeding .... PASSED
+tests/test_simulator_physics.py::test_25_devices_specification ......... PASSED
+tests/test_simulator_physics.py::test_sensor_bounds_and_volatility ..... PASSED
+============================= 17 passed in 36.58s =============================
 ```
 
 ### Frontend Production Build Verification
 ```
+> pxt-smart-infrastructure-dashboard@1.0.0 build
 > tsc && vite build
-✓ 2281 modules transformed.
-dist/index.html                   0.56 kB │ gzip:   0.39 kB
-dist/assets/index-CX4KPxdr.css   29.87 kB │ gzip:   5.95 kB
-dist/assets/index-5aoPQFTh.js   631.73 kB │ gzip: 174.62 kB
-✓ built in 9.15s (0 TypeScript errors)
+✓ 2284 modules transformed.
+dist/index.html                     0.56 kB │ gzip:   0.38 kB
+dist/assets/index-q_xtWvow.css     30.44 kB │ gzip:   6.04 kB
+dist/assets/index-CIq0vogR.js   1,007.45 kB │ gzip: 289.39 kB
+✓ built in 8.90s (0 TypeScript errors)
 ```

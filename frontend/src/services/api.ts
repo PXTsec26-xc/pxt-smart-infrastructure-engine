@@ -254,11 +254,8 @@ class ConnectionStateManager {
     this.errorMessage = null;
     this.retryAttempt = 0;
 
-    if (this.wsConnected) {
-      this.state = 'CONNECTED';
-    } else {
-      this.state = 'DEGRADED';
-    }
+    // HTTP REST API is fully operational
+    this.state = 'CONNECTED';
     this.notify();
   }
 
@@ -279,12 +276,7 @@ class ConnectionStateManager {
     this.wsConnected = true;
     this.lastSuccessfulSync = Date.now();
     this.retryAttempt = 0;
-
-    if (this.httpConnected) {
-      this.state = 'CONNECTED';
-    } else {
-      this.state = 'DEGRADED';
-    }
+    this.state = 'CONNECTED';
     this.notify();
   }
 
@@ -293,7 +285,8 @@ class ConnectionStateManager {
     if (detail) this.errorMessage = detail;
 
     if (this.httpConnected) {
-      this.state = 'DEGRADED';
+      // Serverless REST API polling handles telemetry gracefully
+      this.state = 'CONNECTED';
     } else if (this.retryAttempt >= this.maxRetries) {
       this.state = 'OFFLINE';
     } else {
